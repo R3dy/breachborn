@@ -10,6 +10,7 @@ export type Char = {
   name: string;
   race: string;
   level: number;
+  xp: number;
   pos: Vec3;
   yaw: number;
   anim: Anim;
@@ -24,6 +25,7 @@ export type CharRecord = {
   name: string;
   race: string;
   level: number;
+  xp: number;
   lastPos: Vec3;
   disconnectedAt: number;
 };
@@ -79,6 +81,7 @@ export class World {
       name: opts.name,
       race: opts.race,
       level: rec?.level ?? 1,
+      xp: rec?.xp ?? 0,
       pos,
       yaw: 0,
       anim: 'idle',
@@ -87,9 +90,18 @@ export class World {
     this.chars.set(char.charId, char);
     this.registry.set(char.charId, {
       charId: char.charId, name: char.name, race: char.race,
-      level: char.level, lastPos: pos, disconnectedAt: 0,
+      level: char.level, xp: char.xp, lastPos: pos, disconnectedAt: 0,
     });
     return { char, restored };
+  }
+
+  // Server-side XP award (story 3.2: mob kills). Level curve lands in 5.4.
+  addXp(charId: string, amount: number): number {
+    const char = this.chars.get(charId);
+    const rec = this.registry.get(charId);
+    if (char) char.xp += amount;
+    if (rec) rec.xp = char ? char.xp : rec.xp + amount;
+    return char?.xp ?? rec?.xp ?? 0;
   }
 
   // Removes from the live shard; keeps the registry record for reconnects.
@@ -101,6 +113,7 @@ export class World {
     if (rec) {
       rec.name = char.name;
       rec.level = char.level;
+      rec.xp = char.xp;
       rec.lastPos = { ...char.pos };
       rec.disconnectedAt = now;
     }
@@ -122,6 +135,20 @@ export class World {
       const dx = c.pos.x - me.pos.x;
       const dy = c.pos.y - me.pos.y;
       const dz = c.pos.z - me.pos.z;
+      if (dx * dx + dy * dy + dz * dz <= r2) out.push(c);
+    }
+    return out;
+  }
+
+  // Every live char within `radius` of a world position — how combat/mob
+  // events find their audience (mobs aren't chars, so they anchor the AOI).
+  charsInRange(pos: Vec3, radius: number): Char[] {
+    const out: Char[] = [];
+    const r2 = radius * radius;
+    for (const c of this.chars.values()) {
+      const dx = c.pos.x - pos.x;
+      const dy = c.pos.y - pos.y;
+      const dz = c.pos.z - pos.z;
       if (dx * dx + dy * dy + dz * dz <= r2) out.push(c);
     }
     return out;

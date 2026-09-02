@@ -69,7 +69,45 @@ export const MOVEMENT = {
 export const COMBAT = {
   COMBO_STAGES: 3, DODGE_IFRAMES_MS: 300, DODGE_COOLDOWN_MS: 1200,
   CRIT_CHANCE: 0.10, BASE_DAMAGE: [12, 14, 20] as const,
+  CRIT_MULT: 2,
+  MELEE_RANGE: 2.2, ATTACK_COOLDOWN_MS: 420, COMBO_WINDOW_MS: 1100,
+  PLAYER_BASE_HP: 100, HP_PER_VIGOR: 2,
+  DEATH_RESPAWN_MS: 5000, DRIFT_DEBUFF_MS: 15000,
 } as const;
+
+// ---- Mobs (story 3.2) ----
+export type MobType = 'glimmerling' | 'warden-drone';
+
+export type MobStats = {
+  name: string;
+  hp: number; dmg: number;
+  aggroRadius: number; speed: number;
+  windupMs: number; attackRange: number; attackCooldownMs: number;
+  xp: number; respawnMs: number;
+  body: number; accent: number; scale: number;
+};
+
+export const MOB_TYPES: Record<MobType, MobStats> = {
+  glimmerling: {
+    name: 'Feral Glimmerling', hp: 30, dmg: 6, aggroRadius: 12, speed: 3.2,
+    windupMs: 700, attackRange: 2.2, attackCooldownMs: 1600, xp: 25, respawnMs: 20000,
+    body: 0x5F6B5E, accent: 0x8FBF7A, scale: 0.85,
+  },
+  'warden-drone': {
+    name: 'Warden Drone', hp: 55, dmg: 11, aggroRadius: 16, speed: 2.6,
+    windupMs: 1100, attackRange: 3.0, attackCooldownMs: 2200, xp: 40, respawnMs: 20000,
+    body: 0x23262E, accent: 0x4BE3FF, scale: 1,
+  },
+};
+
+export const LEASH_RANGE = 40; // target farther than this from mob spawn → walk home + drop aggro
+
+export const DUMMY = {
+  ID: 'dummy-0',
+  POS: { x: 9, y: 2.2, z: -6 }, // by the spawn ring
+  RESET_RADIUS: 10,             // last attacker leaves this radius → DPS log resets
+  DPS_WINDOW_MS: 10000,         // rolling DPS window
+} as const satisfies { ID: string; POS: { x: number; y: number; z: number }; RESET_RADIUS: number; DPS_WINDOW_MS: number };
 
 export const PARTY = { MAX: 4 } as const;
 export const CHAT = { RATE_LIMIT: 10, RATE_WINDOW_SEC: 10 } as const;
