@@ -96,6 +96,23 @@ function onServerMsg(msg: ServerMsg): void {
     case 'despawn':
       remotes.remove(msg.charId);
       break;
+    case 'movement':
+      if (msg.charId !== myCharId) {
+        remotes.apply(msg.charId, msg.pos, msg.yaw, msg.anim, performance.now());
+      }
+      break;
+    case 'pong':
+      // Periodic server-pos reconciliation: snap only on real drift
+      // (e.g. tab-hidden), otherwise the client stays predicted.
+      if (msg.pos && myCharId) {
+        const d = Math.hypot(msg.pos.x - player.pos.x, msg.pos.z - player.pos.z);
+        if (d > 4) {
+          player.pos.x = msg.pos.x;
+          player.pos.z = msg.pos.z;
+          player.pos.y = groundHeight(msg.pos.x, msg.pos.z) + 2.2;
+        }
+      }
+      break;
     case 'error':
       hud.chatSystem(msg.message);
       break;
@@ -121,12 +138,19 @@ hud.onEnterWorld(({ name, race }) => {
 // render loop
 const clock = new THREE.Clock();
 let frames = 0, fpsLast = performance.now(), infoLast = 0;
+
+// Movement send (story 2.2): 10Hz while moving, one final frame on stop.
+const SEND_INTERVAL_MS = 100;
+let moveTimer = 0;
+let moveSeq = 0;
+let wasMoving = false;
+
 function tick(): void {
   requestAnimationFrame(tick);
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
-  frames++;
   const now = performance.now();
+  frames++;
   if (now - fpsLast > 500) {
     hud.setFps(Math.round((frames * 1000) / (now - fpsLast)));
     frames = 0; fpsLast = now;
@@ -137,6 +161,20 @@ function tick(): void {
     console.log(`[perf] calls=${i.calls} tris=${i.triangles}`);
   }
   player.update(dt, input, camera);
+  moveTimer += dt * 1000;
+  if (entered && moveTimer >= SEND_INTERVAL_MS && (player.moving || wasMoving)) {
+    moveTimer = 0;
+    net.send({
+      t: 'movement',
+      seq: moveSeq++,
+      ts: now,
+      pos: { x: player.pos.x, y: player.pos.y, z: player.pos.z },
+      yaw: player.facing,
+      anim: player.anim,
+    });
+  }
+  wasMoving = player.moving;
+  remotes.update(now, dt);
   world.update(t, dt, camera);
   renderer.render(scene, camera);
   (window as unknown as { __frames: number }).__frames =

@@ -1,6 +1,7 @@
-// World state: characters, identity registry, AOI filtering, join/despawn.
-// Pure (no ws imports) — transport glue lives in index.ts (story 2.1).
+// World state: characters, identity registry, AOI filtering, join/despawn,
+// movement validation. Pure (no ws imports) — transport glue in index.ts.
 import type { RosterEntry, Vec3 } from '@breachborn/shared';
+import { MOVEMENT } from '@breachborn/shared';
 
 export type Anim = 'idle' | 'walk' | 'run' | 'jump';
 
@@ -37,6 +38,30 @@ export function isAnim(v: unknown): v is Anim {
   return typeof v === 'string' && (ANIMS as readonly string[]).includes(v);
 }
 
+// Server-side anticheat (canon formula): WALK_SPEED * SPRINT_MULT *
+// MAX_SERVER_DELTA_PER_TICK — the max distance accepted per movement update.
+export const MOVE_CLAMP = MOVEMENT.WALK_SPEED * MOVEMENT.SPRINT_MULT * MOVEMENT.MAX_SERVER_DELTA_PER_TICK;
+
+export type MoveVerdict = 'accepted' | 'clamped' | 'rejected';
+
+// Validate a claimed move against the char's last accepted position.
+// - accepted: within the clamp → take the client pos (client-predicted world)
+// - clamped : beyond the clamp → take the farthest point along the claimed
+//             direction (world stays continuous, cheat gains nothing extra)
+// - rejected: non-finite garbage → keep server pos entirely
+export function validateMove(from: Vec3, to: Vec3): { verdict: MoveVerdict; pos: Vec3 } {
+  if (!Number.isFinite(to.x) || !Number.isFinite(to.y) || !Number.isFinite(to.z)) {
+    return { verdict: 'rejected', pos: from };
+  }
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const dz = to.z - from.z;
+  const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  if (dist <= MOVE_CLAMP) return { verdict: 'accepted', pos: { ...to } };
+  const k = MOVE_CLAMP / dist;
+  return { verdict: 'clamped', pos: { x: from.x + dx * k, y: from.y + dy * k, z: from.z + dz * k } };
+}
+
 export class World {
   readonly chars = new Map<string, Char>();
   readonly registry = new Map<string, CharRecord>();
@@ -44,7 +69,10 @@ export class World {
 
   join(opts: { charId: string; name: string; race: string; now: number; restore: boolean }): { char: Char; restored: boolean } {
     const rec = this.registry.get(opts.charId);
-    const restored = opts.restore && rec !== undefined;
+    // <5s reconnect restores the character's last state (AC story 2.1).
+    const restored = opts.restore && rec !== undefined
+      && rec.disconnectedAt > 0
+      && opts.now - rec.disconnectedAt < RECONNECT_GRACE_MS;
     const pos: Vec3 = restored && rec ? { ...rec.lastPos } : { ...SPAWN };
     const char: Char = {
       charId: opts.charId,
@@ -101,5 +129,20 @@ export class World {
 
   rosterFor(charId: string): RosterEntry[] {
     return this.othersInAoi(charId).map((c) => ({ charId: c.charId, name: c.name, level: c.level }));
+  }
+
+  // Server-authoritative movement: validate, mutate the char, count violations.
+  applyMovement(char: Char, pos: Vec3, yaw: number, anim: string, now: number): MoveVerdict {
+    if (!Number.isFinite(yaw) || !isAnim(anim)) {
+      this.violations++;
+      return 'rejected';
+    }
+    const v = validateMove(char.pos, pos);
+    if (v.verdict === 'rejected' || v.verdict === 'clamped') this.violations++;
+    char.pos = v.pos;
+    char.yaw = yaw;
+    char.anim = anim;
+    char.lastSeen = now;
+    return v.verdict;
   }
 }

@@ -26,7 +26,7 @@ export type ServerMsg =
   | { t: 'party'; members: string[] }
   | { t: 'emote'; charId: string; emote: string }
   | { t: 'trace'; value: number; state: 'idle' | 'watching' | 'alert' }
-  | { t: 'pong'; ts: number }
+  | { t: 'pong'; ts: number; pos?: Vec3 }
   | { t: 'error'; code: string; message: string };
 
 export type RosterEntry = { charId: string; name: string; level: number };

@@ -4,9 +4,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import type { ClientMsg, ServerMsg } from '@breachborn/shared';
-import {
-  World, RECONNECT_GRACE_MS,
-} from './world.ts';
+import { World } from './world.ts';
 import { issueToken, verifyToken, newCharId, validateName, fallbackName, dedupeName, escapeHtml, sanitizeName } from './auth.ts';
 
 type HelloMsg = Extract<ClientMsg, { t: 'hello' }>;
@@ -51,7 +49,10 @@ wss.on('connection', (ws: WebSocket) => {
     if (!msg || typeof msg !== 'object' || typeof msg.t !== 'string') return;
 
     if (msg.t === 'ping') {
-      sendTo(ws, { t: 'pong', ts: typeof msg.ts === 'number' ? msg.ts : 0 });
+      const char = charId ? world.chars.get(charId) : undefined;
+      const reply: ServerMsg = { t: 'pong', ts: typeof msg.ts === 'number' ? msg.ts : 0 };
+      if (char) reply.pos = char.pos; // client-side reconciliation hook
+      sendTo(ws, reply);
       return;
     }
 
@@ -65,11 +66,23 @@ wss.on('connection', (ws: WebSocket) => {
     if (!char) return;
 
     switch (msg.t) {
-      case 'movement':
+      case 'movement': {
+        // Client sends at 10Hz; server validates then forwards at the same
+        // cadence (within the 10-20Hz budget). Clamped moves broadcast the
+        // server-corrected position so the world stays continuous.
+        const verdict = world.applyMovement(char, msg.pos, msg.yaw, msg.anim, Date.now());
+        if (verdict !== 'rejected') {
+          broadcastAoi(charId, {
+            t: 'movement', charId,
+            pos: char.pos, yaw: char.yaw, anim: char.anim,
+          });
+        }
+        return;
+      }
       case 'combat':
       case 'quest':
       case 'terminal':
-        return; // arrives in stories 2.2 / M3+ / M4+
+        return; // arrives in M3+ / M4+
       case 'chat':
       case 'party':
       case 'emote':
@@ -95,16 +108,9 @@ function handleHello(ws: WebSocket, msg: HelloMsg, setCharId: (id: string) => vo
   // Token → character resolution (valid token restores identity; invalid is
   // treated as no token — hard tamper handling is story 7.3).
   let regCharId: string | undefined;
-  let restored = false;
   if (typeof msg.token === 'string' && msg.token.length > 0) {
     const payload = verifyToken(msg.token, now);
-    if (payload) {
-      const rec = world.registry.get(payload.charId);
-      if (rec) {
-        regCharId = rec.charId;
-        restored = rec.disconnectedAt > 0 && now - rec.disconnectedAt < RECONNECT_GRACE_MS;
-      }
-    }
+    if (payload && world.registry.has(payload.charId)) regCharId = payload.charId;
   }
 
   const charId2 = regCharId ?? newCharId();
@@ -127,7 +133,7 @@ function handleHello(ws: WebSocket, msg: HelloMsg, setCharId: (id: string) => vo
   const old = byChar.get(charId2);
   if (old && old !== ws) old.close();
 
-  const { char } = world.join({ charId: charId2, name, race, now, restore: restored });
+  const { char } = world.join({ charId: charId2, name, race, now, restore: regCharId !== undefined });
   byChar.set(char.charId, ws);
   setCharId(char.charId);
 

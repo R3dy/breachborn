@@ -1,7 +1,11 @@
-// Remote players: simplified clone of the courier mesh + name glyph sprite.
-// Story 2.1 owns spawn/despawn; story 2.2 adds the 100ms interpolation buffer.
+// Remote players: simplified clone of the courier mesh + name glyph sprite,
+// 100ms interpolation buffer (lerp between last two snapshots) — story 2.2.
 import * as THREE from 'three';
 import type { Vec3 } from '@breachborn/shared';
+
+type Anim = 'idle' | 'walk' | 'run' | 'jump';
+
+type Snap = { x: number; y: number; z: number; yaw: number; anim: Anim; t: number };
 
 type Remote = {
   group: THREE.Group;
@@ -9,8 +13,13 @@ type Remote = {
   legR: THREE.Mesh;
   armL: THREE.Mesh;
   armR: THREE.Mesh;
-  pos: THREE.Vector3;
+  pos: THREE.Vector3;   // last rendered position
+  snaps: Snap[];        // newest last, max 3
+  animPhase: number;
 };
+
+const INTERP_MS = 100;
+const MAX_SNAPS = 3;
 
 function makeNameSprite(name: string): THREE.Sprite {
   const canvas = document.createElement('canvas');
@@ -49,7 +58,18 @@ function buildMesh(name: string, pos: Vec3): Remote {
   const legR = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.6, 3, 6), bodyMat); legR.position.set(0.2, 0.45, 0);
   group.add(torso, head, hood, armL, armR, legL, legR, makeNameSprite(name));
   group.position.set(pos.x, pos.y, pos.z);
-  return { group, legL, legR, armL, armR, pos: new THREE.Vector3(pos.x, pos.y, pos.z) };
+  return {
+    group, legL, legR, armL, armR,
+    pos: new THREE.Vector3(pos.x, pos.y, pos.z),
+    snaps: [], animPhase: 0,
+  };
+}
+
+function lerpAngle(a: number, b: number, t: number): number {
+  let d = (b - a) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return a + d * t;
 }
 
 export class Remotes {
@@ -80,6 +100,59 @@ export class Remotes {
       }
     });
     this.map.delete(charId);
+  }
+
+  // Feed a server snapshot; render position trails 100ms behind for smoothness.
+  apply(charId: string, pos: Vec3, yaw: number, anim: Anim, now: number): void {
+    const r = this.map.get(charId);
+    if (!r) return;
+    r.snaps.push({ x: pos.x, y: pos.y, z: pos.z, yaw, anim, t: now });
+    if (r.snaps.length > MAX_SNAPS) r.snaps.shift();
+  }
+
+  // Per-frame interpolation + anim-driven limb swing. Allocation-free.
+  update(now: number, dt: number): void {
+    const renderT = now - INTERP_MS;
+    for (const r of this.map.values()) {
+      const s = r.snaps;
+      if (s.length === 0) continue;
+      const latest = s[s.length - 1] as Snap;
+      let px: number, py: number, pz: number, yaw: number;
+      if (s.length >= 2) {
+        const a = s[s.length - 2] as Snap;
+        const span = latest.t - a.t;
+        const alpha = span > 0 ? Math.min(1, Math.max(0, (renderT - a.t) / span)) : 1;
+        px = a.x + (latest.x - a.x) * alpha;
+        py = a.y + (latest.y - a.y) * alpha;
+        pz = a.z + (latest.z - a.z) * alpha;
+        yaw = lerpAngle(a.yaw, latest.yaw, alpha);
+      } else {
+        px = latest.x; py = latest.y; pz = latest.z; yaw = latest.yaw;
+      }
+      r.pos.set(px, py, pz);
+      r.group.position.copy(r.pos);
+      r.group.rotation.y = yaw;
+
+      const anim = latest.anim;
+      if (anim === 'walk' || anim === 'run') {
+        r.animPhase += dt * (anim === 'run' ? 11 : 9);
+        const sw = Math.sin(r.animPhase);
+        r.legL.rotation.x = sw * 0.5;
+        r.legR.rotation.x = -sw * 0.5;
+        r.armL.rotation.x = -sw * 0.3;
+        r.armR.rotation.x = sw * 0.3;
+      } else if (anim === 'jump') {
+        r.legL.rotation.x = 0.45;
+        r.legR.rotation.x = 0.45;
+        r.armL.rotation.x = -0.5;
+        r.armR.rotation.x = -0.5;
+      } else {
+        r.legL.rotation.x = 0;
+        r.legR.rotation.x = 0;
+        r.armL.rotation.x = 0;
+        r.armR.rotation.x = 0;
+      }
+    }
   }
 
   posOf(charId: string): THREE.Vector3 | null {
