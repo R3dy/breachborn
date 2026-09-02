@@ -72,7 +72,8 @@ function sendHello(): void {
   net.send({ t: 'hello', name: myName, race: myRace, token: savedToken() });
 }
 
-const net = connectNet(`ws://${location.hostname}:8080`, {
+const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) ?? `ws://${location.hostname}:8080`;
+const net = connectNet(WS_URL, {
   offline: (offline) => hud.setNetOffline(offline),
   open: () => { if (entered) sendHello(); }, // reconnect → session restore via token
   message: (msg: ServerMsg) => onServerMsg(msg),
