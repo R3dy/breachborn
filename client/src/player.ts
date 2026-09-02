@@ -8,6 +8,8 @@ export type Player = {
   pos: THREE.Vector3;
   yaw: number;            // camera yaw
   facing: number;         // body facing
+  moving: boolean;        // updated every tick (netcode reads this)
+  anim: 'idle' | 'walk' | 'run' | 'jump';
   update: (dt: number, input: Input, camera: THREE.PerspectiveCamera) => void;
 };
 
@@ -47,6 +49,8 @@ export function createPlayer(scene: THREE.Scene, spawn: THREE.Vector3): Player {
   let yaw = -0.2, pitch = 0.36, zoom = CAMERA.ZOOM_MAX * 0.75, zoomTarget = zoom;
   let facing = 0, vy = 0, grounded = true;
   let animT = 0;
+  let moving = false;
+  let anim: 'idle' | 'walk' | 'run' | 'jump' = 'idle';
   const camTarget = new THREE.Vector3().copy(pos).add(new THREE.Vector3(0, 1.6, 0));
 
   function update(dt: number, input: Input, camera: THREE.PerspectiveCamera): void {
@@ -66,12 +70,12 @@ export function createPlayer(scene: THREE.Scene, spawn: THREE.Vector3): Player {
     if (input.keys.has('KeyA')) mv.sub(r);
     if (input.keys.has('KeyD')) mv.add(r);
     const speed = MOVEMENT.WALK_SPEED * (input.keys.has('ShiftLeft') || input.keys.has('ShiftRight') ? MOVEMENT.SPRINT_MULT : 1);
-    let moving = false;
+    let movingNow = false;
     if (mv.lengthSq() > 0) {
       mv.normalize().multiplyScalar(speed * dt);
       pos.x += mv.x; pos.z += mv.z;
       facing = Math.atan2(mv.x, mv.z);
-      moving = true;
+      movingNow = true;
     }
     // jump + gravity
     const gy = groundHeight(pos.x, pos.z) + 2.2;
@@ -82,12 +86,16 @@ export function createPlayer(scene: THREE.Scene, spawn: THREE.Vector3): Player {
     group.position.copy(pos);
     group.rotation.y = facing;
 
+    // netcode-visible state
+    moving = movingNow;
+    anim = !grounded ? 'jump' : movingNow ? (speed > MOVEMENT.WALK_SPEED + 0.01 ? 'run' : 'walk') : 'idle';
+
     // leg swing
-    if (moving) animT += dt * (speed > MOVEMENT.WALK_SPEED ? 11 : 9);
-    legL.rotation.x = moving ? Math.sin(animT) * 0.5 : 0;
-    legR.rotation.x = moving ? Math.sin(animT + Math.PI) * 0.5 : 0;
-    armL.rotation.x = moving ? Math.sin(animT + Math.PI) * 0.3 : 0;
-    armR.rotation.x = moving ? Math.sin(animT) * 0.3 : 0;
+    if (movingNow) animT += dt * (speed > MOVEMENT.WALK_SPEED ? 11 : 9);
+    legL.rotation.x = movingNow ? Math.sin(animT) * 0.5 : 0;
+    legR.rotation.x = movingNow ? Math.sin(animT + Math.PI) * 0.5 : 0;
+    armL.rotation.x = movingNow ? Math.sin(animT + Math.PI) * 0.3 : 0;
+    armR.rotation.x = movingNow ? Math.sin(animT) * 0.3 : 0;
 
     // blob shadow
     blob.position.set(pos.x, gy - 2.15, pos.z);
@@ -106,5 +114,5 @@ export function createPlayer(scene: THREE.Scene, spawn: THREE.Vector3): Player {
     camera.lookAt(camTarget);
   }
 
-  return { group, pos, yaw, facing, update };
+  return { group, pos, yaw, facing, moving, anim, update };
 }

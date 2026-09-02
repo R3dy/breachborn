@@ -24,9 +24,10 @@ export type ServerMsg =
   | { t: 'terminal'; session: string; out: TerminalOut }
   | { t: 'chat'; from: string; channel: 'local' | 'party'; text: string }
   | { t: 'party'; members: string[] }
+  | { t: 'partyInvite'; from: string }
   | { t: 'emote'; charId: string; emote: string }
   | { t: 'trace'; value: number; state: 'idle' | 'watching' | 'alert' }
-  | { t: 'pong'; ts: number }
+  | { t: 'pong'; ts: number; pos?: Vec3 }
   | { t: 'error'; code: string; message: string };
 
 export type RosterEntry = { charId: string; name: string; level: number };
