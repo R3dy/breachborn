@@ -98,9 +98,13 @@ export function createPlayer(scene: THREE.Scene, spawn: THREE.Vector3): Player {
   }
 
   function update(dt: number, input: Input, camera: THREE.PerspectiveCamera): void {
-    // mouse look
+    // camera turn: mouse (locked or drag) + arrow keys (classic MMO fallback)
     yaw -= input.mouseDX * 0.0024;
     pitch = Math.max(-0.05, Math.min(1.1, pitch + input.mouseDY * 0.0022));
+    if (input.keys.has('ArrowLeft')) yaw += 2.4 * dt;
+    if (input.keys.has('ArrowRight')) yaw -= 2.4 * dt;
+    if (input.keys.has('ArrowUp')) pitch = Math.max(-0.05, pitch - 1.6 * dt);
+    if (input.keys.has('ArrowDown')) pitch = Math.min(1.1, pitch + 1.6 * dt);
     zoomTarget = Math.max(CAMERA.ZOOM_MIN, Math.min(CAMERA.ZOOM_MAX, zoomTarget + input.scroll * 0.004));
     zoom += (zoomTarget - zoom) * ZOOM_LERP;
     input.mouseDX = 0; input.mouseDY = 0; input.scroll = 0;
@@ -120,7 +124,11 @@ export function createPlayer(scene: THREE.Scene, spawn: THREE.Vector3): Player {
     if (mv.lengthSq() > 0) {
       mv.normalize().multiplyScalar(speed * dt);
       pos.x += mv.x; pos.z += mv.z;
-      facing = Math.atan2(mv.x, mv.z);
+      // body smoothly follows movement direction (shortest-arc, no snapping)
+      const target = Math.atan2(mv.x, mv.z);
+      let d = target - facing;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      facing += d * Math.min(1, dt * 14);
       movingNow = true;
     }
     // dodge-roll displacement (client-side feel; server clamp tolerates it)

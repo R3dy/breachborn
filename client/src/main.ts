@@ -39,21 +39,33 @@ const spawn = new THREE.Vector3(4, 0, -12);
 spawn.y = groundHeight(spawn.x, spawn.z) + 2.2;
 const player = createPlayer(scene, spawn);
 
-// pointer lock + input
+// pointer lock + input — standard 3rd-person controls:
+// primary = pointer-lock mouse-look; fallback = drag anywhere on canvas to turn;
+// arrow keys turn the camera; WASD is always relative to the camera.
 const input: Input = { keys: new Set(), mouseDX: 0, mouseDY: 0, scroll: 0 };
 const clicklay = document.getElementById('clicklay')!;
+const lookchip = document.getElementById('lookchip')!;
 let booted = false;
-renderer.domElement.addEventListener('click', () => { if (booted) void renderer.domElement.requestPointerLock(); });
+let dragging = false;
+renderer.domElement.addEventListener('mousedown', (e) => {
+  if (!booted) return;
+  dragging = true;
+  if (document.pointerLockElement !== renderer.domElement) void renderer.domElement.requestPointerLock();
+});
+window.addEventListener('mouseup', () => { dragging = false; });
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === renderer.domElement;
-  if (booted) clicklay.classList.toggle('show', !locked);
+  // Boot overlay is for soul-name entry only — never re-block the scene mid-game.
+  if (booted) lookchip.classList.toggle('show', !locked);
 });
 document.addEventListener('mousemove', (e) => {
-  if (document.pointerLockElement !== renderer.domElement) return;
-  input.mouseDX += e.movementX; input.mouseDY += e.movementY;
+  const locked = document.pointerLockElement === renderer.domElement;
+  if (locked) { input.mouseDX += e.movementX; input.mouseDY += e.movementY; }
+  else if (dragging) { input.mouseDX += e.movementX * 1.4; input.mouseDY += e.movementY * 1.4; }
 });
 window.addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement) return; // typing in chat
+  if (e.code.startsWith('Arrow')) e.preventDefault(); // camera turn keys — never scroll
   input.keys.add(e.code);
 });
 window.addEventListener('keyup', (e) => { input.keys.delete(e.code); });
