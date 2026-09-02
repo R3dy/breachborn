@@ -1,0 +1,8 @@
+{
+  "name": "@breachborn/server",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "node --watch src/index.ts", "build": "tsc --noEmit", "start": "node src/index.ts" },
+  "dependencies": { "ws": "^8.18.0" },
+  "devDependencies": { "@types/ws": "^8.5.0", "typescript": "^5.6.0" }
+}
