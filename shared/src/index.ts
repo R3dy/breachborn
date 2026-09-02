@@ -1,2 +1,2 @@
-export * from './protocol.js';
-export * from './canon.js';
+export * from './protocol.ts';
+export * from './canon.ts';
