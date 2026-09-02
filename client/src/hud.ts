@@ -11,6 +11,8 @@ export type Hud = {
   chatSystem: (text: string) => void;
   setNetOffline: (offline: boolean) => void;
   onEnterWorld: (cb: (soul: { name: string; race: string }) => void) => void;
+  setCharName: (name: string) => void;
+  setParty: (members: string[]) => void;
 };
 
 const $ = <T extends HTMLElement>(id: string): T => {
@@ -69,12 +71,33 @@ export function createHud(): Hud {
     localStorage.setItem('breachborn.soul', name);
     localStorage.setItem('breachborn.race', race);
     $('clicklay').classList.remove('show');
-    $('charplate').textContent = `${name.toUpperCase()} — LVL 1`;
-    $('partyYou').textContent = name;
+    setCharName(name);
     enterCb?.({ name, race });
   }
   $('enterBtn').addEventListener('click', enterWorld);
   nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') enterWorld(); });
+
+  // Char plate + party frame — server name (with dedupe suffix) is authoritative.
+  let charName = '';
+  function setCharName(name: string): void {
+    charName = name;
+    $('charplate').textContent = `${name.toUpperCase()} — LVL 1`;
+  }
+  function setParty(members: string[]): void {
+    const frame = $('party');
+    frame.replaceChildren();
+    const you = document.createElement('div');
+    you.className = 'p you';
+    you.textContent = `✦ ${charName || 'you'} (you)`;
+    frame.appendChild(you);
+    for (const m of members) {
+      const d = document.createElement('div');
+      d.className = 'p';
+      d.textContent = m; // textContent — server-sanitized or not, inert
+      frame.appendChild(d);
+    }
+  }
+  setParty([]);
 
   return {
     setFps: (fps) => { fpsEl.textContent = `FPS ${fps}`; },
@@ -110,5 +133,7 @@ export function createHud(): Hud {
     },
     setNetOffline: (offline) => { banner.classList.toggle('show', offline); },
     onEnterWorld: (cb) => { enterCb = cb; },
+    setCharName,
+    setParty,
   };
 }
