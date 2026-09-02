@@ -82,6 +82,14 @@
       color:#0E1015; font-family:Georgia,serif; letter-spacing:2px; font-size:12px;
       padding:5px 14px; cursor:pointer; }
     #invAccept:hover { filter:brightness(1.15); }
+
+    #deathlay { position:fixed; inset:0; z-index:70; display:grid; place-items:center;
+      text-align:center; opacity:0; pointer-events:none; transition:opacity .55s ease;
+      background:radial-gradient(circle at 50% 42%, rgba(30,10,12,.72) 0%, rgba(6,8,10,.93) 70%); }
+    #deathlay.show { opacity:1; }
+    #deathlay h2 { font-family:Georgia,serif; font-weight:500; color:var(--ember);
+      font-size:26px; letter-spacing:6px; text-shadow:0 2px 12px #000; }
+    #deathlay p { margin-top:10px; color:#b8bdc4; font-size:13px; letter-spacing:1px; }
     #fsbtn { pointer-events:auto; margin-top:6px; background:#14161c; color:var(--gold);
       border:1px solid rgba(232,201,106,.4); font-family:Georgia,serif; letter-spacing:2px;
       font-size:11px; padding:6px 14px; cursor:pointer; clip-path:polygon(0 0,100% 0,calc(100% - 8px) 100%,0 100%); }
@@ -175,6 +183,13 @@
   </div>
 
   <div id="invtoast"><span><b id="invFrom"></b> invites you to a party</span><button id="invAccept">ACCEPT</button></div>
+
+  <div id="deathlay">
+    <div>
+      <h2>THE WEAVE RELEASES YOU</h2>
+      <p id="deathsub"></p>
+    </div>
+  </div>
 
   <div id="clicklay">
     <h2>BREACHBORN</h2>

@@ -1,10 +1,13 @@
-// BREACHBORN client entry — render loop, input, boot, netcode (M2).
+// BREACHBORN client entry — render loop, input, boot, netcode (M2), combat (M3).
 import * as THREE from 'three';
 import { createWorld, groundHeight } from './world.ts';
 import { createPlayer, type Input } from './player.ts';
 import { createHud } from './hud.ts';
 import { connectNet, startPing } from './net.ts';
 import { Remotes } from './remote.ts';
+import { MobsView } from './mobs.ts';
+import { Fx } from './fx.ts';
+import { CombatView } from './combat.ts';
 import type { ServerMsg } from '@breachborn/shared';
 
 const EMOTE_LABELS: Record<string, string> = { wave: '*waves*', dance: '*dances*', point: '*points*' };
@@ -30,6 +33,7 @@ const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 90
 
 const world = createWorld(scene);
 const hud = createHud();
+const fx = new Fx(scene);
 
 const spawn = new THREE.Vector3(4, 0, -12);
 spawn.y = groundHeight(spawn.x, spawn.z) + 2.2;
@@ -56,9 +60,14 @@ window.addEventListener('keyup', (e) => { input.keys.delete(e.code); });
 window.addEventListener('wheel', (e) => { input.scroll += e.deltaY; }, { passive: true });
 window.addEventListener('contextmenu', (e) => e.preventDefault());
 
-// net — hello/welcome/spawn/despawn (story 2.1); movement sync lands in 2.2,
-// chat/emotes/party in 2.3.
+// net — hello/welcome/spawn/despawn (story 2.1); movement sync (2.2),
+// chat/emotes/party (2.3); combat + mobs (M3).
 const remotes = new Remotes(scene);
+const mobsView = new MobsView(scene, fx);
+const combatView = new CombatView({
+  send: (msg) => net.send(msg),
+  player, remotes, mobs: mobsView, hud, fx,
+});
 const TOKEN_KEY = 'breachborn.token';
 let entered = false;
 let myCharId = '';
@@ -85,6 +94,7 @@ function onServerMsg(msg: ServerMsg): void {
     case 'welcome': {
       myCharId = msg.charId;
       myName = msg.name;
+      combatView.setCharId(msg.charId);
       localStorage.setItem(TOKEN_KEY, msg.token);
       hud.setCharName(msg.name);
       hud.setParty(msg.roster.map((r) => r.name));
@@ -136,6 +146,18 @@ function onServerMsg(msg: ServerMsg): void {
       break;
     case 'error':
       hud.chatSystem(msg.message);
+      break;
+    case 'mobSpawn':
+      mobsView.spawn(msg.mobId, msg.mobType, msg.pos);
+      break;
+    case 'mobMove':
+      mobsView.apply(msg.mobId, msg.pos, msg.yaw, performance.now());
+      break;
+    case 'mobTelegraph':
+      mobsView.telegraph(msg.mobId, msg.ms, performance.now());
+      break;
+    default:
+      combatView.onServerMsg(msg);
       break;
   }
 }
@@ -211,9 +233,11 @@ let wasMoving = false;
 
 function tick(): void {
   requestAnimationFrame(tick);
-  const dt = Math.min(clock.getDelta(), 0.05);
-  const t = clock.elapsedTime;
   const now = performance.now();
+  // hit-stop: brief dt scale when a swing involving me lands (40-70ms)
+  const rawDt = Math.min(clock.getDelta(), 0.05);
+  const dt = now < fx.hitStopUntil ? rawDt * 0.12 : rawDt;
+  const t = clock.elapsedTime;
   frames++;
   if (now - fpsLast > 500) {
     // RTT surfaced in HUD (dev only) — story 2.1 AC
@@ -230,6 +254,12 @@ function tick(): void {
     console.log(`[perf] calls=${i.calls} tris=${i.triangles}`);
   }
   player.update(dt, input, camera);
+  // screen shake (<4px): decaying jitter layered after the follow camera
+  if (fx.shakeAmp > 0.0005) {
+    camera.position.x += (Math.random() - 0.5) * fx.shakeAmp;
+    camera.position.y += (Math.random() - 0.5) * fx.shakeAmp * 0.6;
+    camera.position.z += (Math.random() - 0.5) * fx.shakeAmp;
+  }
   moveTimer += dt * 1000;
   if (entered && moveTimer >= SEND_INTERVAL_MS && (player.moving || wasMoving)) {
     moveTimer = 0;
@@ -244,6 +274,9 @@ function tick(): void {
   }
   wasMoving = player.moving;
   remotes.update(now, dt);
+  mobsView.update(now, dt);
+  fx.update(dt);
+  combatView.update();
   world.update(t, dt, camera);
   renderer.render(scene, camera);
   (window as unknown as { __frames: number }).__frames =

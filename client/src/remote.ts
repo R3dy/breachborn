@@ -1,11 +1,13 @@
 // Remote players: simplified clone of the courier mesh + name glyph sprite,
 // 100ms interpolation buffer (lerp between last two snapshots) — story 2.2.
+// M3: swing anim sync + visibility (death/respawn).
 import * as THREE from 'three';
 import type { Vec3 } from '@breachborn/shared';
+import { INTERP_MS, MAX_SNAPS, pushSnap, sampleSnaps, type Snap } from './interp.ts';
 
 type Anim = 'idle' | 'walk' | 'run' | 'jump';
 
-type Snap = { x: number; y: number; z: number; yaw: number; anim: Anim; t: number };
+type RemoteSnap = Snap & { anim: Anim };
 
 type Remote = {
   group: THREE.Group;
@@ -14,13 +16,14 @@ type Remote = {
   armL: THREE.Mesh;
   armR: THREE.Mesh;
   pos: THREE.Vector3;   // last rendered position
-  snaps: Snap[];        // newest last, max 3
+  snaps: RemoteSnap[];  // newest last, max 3
   animPhase: number;
+  swingT: number;       // <0 = idle; else seconds into the swing
+  visible: boolean;
 };
 
-const INTERP_MS = 100;
-const MAX_SNAPS = 3;
 const FLOATER_LIFE_S = 1.4;
+const SWING_S = 0.28;
 
 type Floater = { sprite: THREE.Sprite; age: number };
 
@@ -84,20 +87,14 @@ function buildMesh(name: string, pos: Vec3): Remote {
   return {
     group, legL, legR, armL, armR,
     pos: new THREE.Vector3(pos.x, pos.y, pos.z),
-    snaps: [], animPhase: 0,
+    snaps: [], animPhase: 0, swingT: -1, visible: true,
   };
-}
-
-function lerpAngle(a: number, b: number, t: number): number {
-  let d = (b - a) % (Math.PI * 2);
-  if (d > Math.PI) d -= Math.PI * 2;
-  if (d < -Math.PI) d += Math.PI * 2;
-  return a + d * t;
 }
 
 export class Remotes {
   private map = new Map<string, Remote>();
   private floaters: Floater[] = [];
+  private sample: Snap = { x: 0, y: 0, z: 0, yaw: 0, t: 0 };
 
   constructor(private scene: THREE.Scene) {}
 
@@ -130,8 +127,21 @@ export class Remotes {
   apply(charId: string, pos: Vec3, yaw: number, anim: Anim, now: number): void {
     const r = this.map.get(charId);
     if (!r) return;
-    r.snaps.push({ x: pos.x, y: pos.y, z: pos.z, yaw, anim, t: now });
-    if (r.snaps.length > MAX_SNAPS) r.snaps.shift();
+    pushSnap(r.snaps, pos.x, pos.y, pos.z, yaw, now);
+  }
+
+  // Swing anim sync from server combat events (stage 0..2).
+  swing(charId: string): void {
+    const r = this.map.get(charId);
+    if (r) r.swingT = 0;
+  }
+
+  setVisible(charId: string, visible: boolean): void {
+    const r = this.map.get(charId);
+    if (!r) return;
+    r.visible = visible;
+    r.group.visible = visible;
+    if (visible) r.snaps.length = 0; // respawned/returned — await fresh snapshots
   }
 
   // Per-frame interpolation + anim-driven limb swing. Allocation-free.
@@ -140,22 +150,11 @@ export class Remotes {
     for (const r of this.map.values()) {
       const s = r.snaps;
       if (s.length === 0) continue;
-      const latest = s[s.length - 1] as Snap;
-      let px: number, py: number, pz: number, yaw: number;
-      if (s.length >= 2) {
-        const a = s[s.length - 2] as Snap;
-        const span = latest.t - a.t;
-        const alpha = span > 0 ? Math.min(1, Math.max(0, (renderT - a.t) / span)) : 1;
-        px = a.x + (latest.x - a.x) * alpha;
-        py = a.y + (latest.y - a.y) * alpha;
-        pz = a.z + (latest.z - a.z) * alpha;
-        yaw = lerpAngle(a.yaw, latest.yaw, alpha);
-      } else {
-        px = latest.x; py = latest.y; pz = latest.z; yaw = latest.yaw;
-      }
-      r.pos.set(px, py, pz);
+      sampleSnaps(s, renderT, this.sample);
+      const latest = s[s.length - 1]!;
+      r.pos.set(this.sample.x, this.sample.y, this.sample.z);
       r.group.position.copy(r.pos);
-      r.group.rotation.y = yaw;
+      r.group.rotation.y = this.sample.yaw;
 
       const anim = latest.anim;
       if (anim === 'walk' || anim === 'run') {
@@ -175,6 +174,14 @@ export class Remotes {
         r.legR.rotation.x = 0;
         r.armL.rotation.x = 0;
         r.armR.rotation.x = 0;
+      }
+
+      // combat swing override (right arm chop)
+      if (r.swingT >= 0) {
+        r.swingT += dt;
+        const p = Math.min(1, r.swingT / SWING_S);
+        r.armR.rotation.x = -Math.sin(p * Math.PI) * 2.1;
+        if (p >= 1) r.swingT = -1;
       }
     }
 
@@ -196,6 +203,10 @@ export class Remotes {
 
   posOf(charId: string): THREE.Vector3 | null {
     return this.map.get(charId)?.pos ?? null;
+  }
+
+  ids(): string[] {
+    return [...this.map.keys()];
   }
 
   // Event-driven emote floater above a position (rises + fades).

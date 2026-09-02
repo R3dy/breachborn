@@ -16,6 +16,10 @@ export type Hud = {
   showInvite: (from: string, accept: () => void) => void;
   onChat: (cb: (text: string) => void) => void;
   isTyping: () => boolean;
+  setDodgeCd: (msLeft: number) => void;   // cooldown tick on the hint line
+  clearDodgeCd: () => void;
+  showDeath: (respawnInMs: number) => void;
+  hideDeath: () => void;
 };
 
 const $ = <T extends HTMLElement>(id: string): T => {
@@ -40,6 +44,9 @@ export function createHud(): Hud {
   const invFrom = $('invFrom');
   const invAccept = $('invAccept');
   const partyFrame = $('party');
+  const hintEl = $('hint');
+  const HINT_BASE = 'WASD move · Shift sprint · Space jump · LMB combo · RMB dodge · F1 fullscreen · F3 FPS';
+  hintEl.textContent = HINT_BASE;
 
   // FPS visibility toggle (F3) — inactive while typing in chat
   let fpsVisible = true;
@@ -149,6 +156,16 @@ export function createHud(): Hud {
       while (chatbox.children.length > 8) chatbox.firstChild?.remove();
     },
     setNetOffline: (offline) => { banner.classList.toggle('show', offline); },
+    setDodgeCd: (msLeft) => {
+      hintEl.textContent = `dodge ready in ${(Math.ceil(msLeft / 100) / 10).toFixed(1)}s · LMB combo · RMB dodge · WASD move`;
+    },
+    clearDodgeCd: () => { hintEl.textContent = HINT_BASE; },
+    showDeath: (respawnInMs) => {
+      const lay = $('deathlay');
+      $('deathsub').textContent = `rematerializing at the spire base… ${Math.ceil(respawnInMs / 1000)}s`;
+      lay.classList.add('show');
+    },
+    hideDeath: () => { $('deathlay').classList.remove('show'); },
     onEnterWorld: (cb) => { enterCb = cb; },
     setCharName,
     setParty,
