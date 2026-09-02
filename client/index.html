@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BREACHBORN — The Quarantine Spire</title>
+  <style>
+    :root {
+      --obsidian:#0E1015; --stone:#23262E; --parchment:#E8E6DF;
+      --ember:#FF7A45; --weave:#4BE3FF; --gold:#E8C96A; --amber:#F5A623;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html,body { width:100%; height:100%; overflow:hidden; background:#000;
+      font-family:'Trebuchet MS','Segoe UI',system-ui,sans-serif; color:var(--parchment); }
+    #app { position:fixed; inset:0; }
+    #app canvas { display:block; }
+    #nogl { position:fixed; inset:0; display:none; place-items:center; background:var(--obsidian);
+      text-align:center; padding:2rem; z-index:99; }
+    #nogl h2 { font-family:Georgia,serif; color:var(--gold); letter-spacing:3px; margin-bottom:10px; }
+    #nogl p { color:#cfd4d2; font-size:14px; max-width:520px; line-height:1.6; }
+
+    #hud { position:fixed; inset:0; pointer-events:none; z-index:10;
+      display:flex; flex-direction:column; justify-content:space-between; padding:18px 22px; }
+    .top-row { display:flex; justify-content:space-between; align-items:flex-start; }
+    .bars { display:flex; flex-direction:column; gap:6px; width:320px; }
+    .bar { position:relative; height:16px; background:rgba(14,16,21,.75);
+      border:1px solid rgba(232,201,106,.35); clip-path:polygon(0 0,100% 0,calc(100% - 8px) 100%,0 100%); }
+    .bar .fill { position:absolute; inset:2px; transform-origin:left; transition:width .25s ease-out; }
+    .bar.hp .fill { background:linear-gradient(90deg,#c34a2a,var(--ember)); }
+    .bar.mp .fill { background:linear-gradient(90deg,#2b7f97,var(--weave)); }
+    .bar.trace .fill { background:linear-gradient(90deg,#3d3d1f,var(--amber)); }
+    .bar span { position:absolute; left:8px; top:1px; font-size:10px; letter-spacing:2px; text-shadow:0 1px 2px #000; z-index:2; }
+    .bar .pct { position:absolute; right:8px; top:1px; font-size:10px; color:#fff8; z-index:2; }
+    #fps { font-family:Consolas,monospace; font-size:12px; color:var(--weave); opacity:.85; margin-top:4px; }
+    #hint { font-size:11px; color:#fff6; letter-spacing:1px; margin-top:4px; }
+    #netbanner { display:none; margin-top:6px; font-size:11px; color:var(--amber);
+      background:rgba(14,16,21,.7); border:1px solid rgba(245,166,35,.4); padding:4px 8px; width:fit-content; }
+    #netbanner.show { display:block; }
+    #charplate { position:absolute; top:64px; left:22px; font-family:Georgia,serif; font-size:13px;
+      color:var(--gold); letter-spacing:2px; text-shadow:0 1px 3px #000; }
+
+    .quest-box { position:absolute; top:120px; left:22px; width:300px;
+      background:rgba(14,16,21,.72); border:1px solid rgba(232,201,106,.3); padding:12px 14px;
+      clip-path:polygon(0 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%); }
+    .quest-box h3 { font-family:Georgia,serif; font-weight:600; color:var(--gold);
+      font-size:14px; letter-spacing:1px; margin-bottom:6px; }
+    .quest-box ul { list-style:none; }
+    .quest-box li { font-size:12px; color:#d8d6cf; padding:2px 0 2px 14px; position:relative; }
+    .quest-box li::before { content:'▸'; position:absolute; left:0; color:var(--weave); }
+    .quest-box li.done { color:#7a8f7a; text-decoration:line-through; }
+    .quest-box li.done::before { content:'✓'; color:var(--gold); }
+
+    #party { position:absolute; top:120px; right:22px; width:170px; font-size:12px; }
+    #party .p { background:rgba(14,16,21,.6); border:1px solid rgba(75,227,255,.25); padding:5px 9px; margin-bottom:5px; }
+    #party .p.you { border-color:rgba(232,201,106,.5); }
+    #party .p span { color:var(--weave); }
+    #minimap { width:210px; height:150px; margin-left:auto; margin-top:10px;
+      border:1px solid rgba(232,201,106,.25); position:relative;
+      background:radial-gradient(circle at 50% 40%, #1a2b33 0%, #101820 60%, #0c1015 100%); }
+    #minimap .dot { position:absolute; width:6px; height:6px; border-radius:50%; }
+    #minimap .north { position:absolute; top:4px; left:50%; transform:translateX(-50%);
+      font-size:10px; color:var(--gold); letter-spacing:2px; }
+
+    #chatwrap { width:420px; }
+    #chatbox { max-height:120px; overflow:hidden; font-size:12px;
+      background:rgba(14,16,21,.55); border:1px solid rgba(232,230,223,.15); padding:8px 10px; }
+    #chatbox .line b { color:var(--gold); }
+    #chatbox .line.sys { color:var(--weave); }
+    #fsbtn { pointer-events:auto; margin-top:6px; background:#14161c; color:var(--gold);
+      border:1px solid rgba(232,201,106,.4); font-family:Georgia,serif; letter-spacing:2px;
+      font-size:11px; padding:6px 14px; cursor:pointer; clip-path:polygon(0 0,100% 0,calc(100% - 8px) 100%,0 100%); }
+    #fsbtn:hover { border-color:var(--gold); box-shadow:0 0 12px #E8C96A33; }
+
+    #clicklay { position:fixed; inset:0; z-index:50; display:none; background:rgba(6,8,10,.82);
+      align-items:center; justify-content:center; flex-direction:column; gap:14px; }
+    #clicklay.show { display:flex; }
+    #clicklay h2 { font-family:Georgia,serif; color:var(--gold); font-weight:500; font-size:28px; letter-spacing:4px; }
+    #clicklay .soul-line { font-family:Georgia,serif; font-size:15px; color:#e8d9c0; letter-spacing:1px; }
+    #clicklay .soul-line b { color:var(--weave); }
+    #nameInput { width:280px; padding:10px 12px; background:#14161c; border:1px solid rgba(232,201,106,.45);
+      color:var(--parchment); font-family:Georgia,serif; font-size:16px; text-align:center; outline:none;
+      clip-path:polygon(0 0,100% 0,calc(100% - 8px) 100%,0 100%); }
+    #nameInput:focus { border-color:var(--gold); box-shadow:0 0 14px #E8C96A33; }
+    #raceRow { display:flex; gap:10px; }
+    .race { padding:7px 18px; background:#14161c; color:#b8bdc4; border:1px solid rgba(232,201,106,.3);
+      font-family:Georgia,serif; font-size:13px; letter-spacing:2px; cursor:pointer; transition:all .15s; }
+    .race:hover { color:var(--gold); border-color:var(--gold); }
+    .race.sel { color:#0E1015; background:var(--gold); border-color:var(--gold); }
+    #enterBtn { padding:12px 26px; background:linear-gradient(90deg,#7a3d22,var(--ember)); color:#fff;
+      border:1px solid #ffa26e; font-family:Georgia,serif; font-size:15px; letter-spacing:3px; cursor:pointer;
+      clip-path:polygon(0 0,100% 0,calc(100% - 10px) 100%,0 100%); transition:all .15s; }
+    #enterBtn:hover { filter:brightness(1.15); box-shadow:0 0 22px #FF7A4566; }
+    #clicklay .small { color:#8b9390; font-size:11px; letter-spacing:1px; }
+    #clicklay kbd { background:#1c1f24; border:1px solid #3a3f47; border-bottom-width:2px; padding:1px 7px;
+      border-radius:4px; font-family:Consolas,monospace; color:#9be8ff; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="nogl">
+    <div>
+      <h2>THE WEAVE CANNOT REACH YOU</h2>
+      <p>Breachborn needs WebGL2. Update Chrome, Edge, or Firefox (latest two versions), or enable hardware acceleration, and return to the Spire.</p>
+    </div>
+  </div>
+
+  <div id="hud">
+    <div class="top-row">
+      <div>
+        <div class="bars">
+          <div class="bar hp"><div class="fill" style="width:100%"></div><span>VIGOR</span><span class="pct">100</span></div>
+          <div class="bar mp"><div class="fill" style="width:100%"></div><span>WILL</span><span class="pct">100</span></div>
+          <div class="bar trace"><div class="fill" style="width:0%"></div><span>TRACE</span><span class="pct">0%</span></div>
+        </div>
+        <div id="fps">FPS —</div>
+        <div id="netbanner">the Weave is flickering… (server offline)</div>
+        <div id="hint">WASD move · Shift sprint · Space jump · mouse look · scroll zoom · F1 fullscreen · F3 FPS</div>
+      </div>
+      <div style="text-align:right; font-family:Georgia,serif;">
+        <div style="color:var(--gold); font-size:18px; letter-spacing:4px;">BREACHBORN</div>
+        <div style="font-size:10px; color:#9aa39e; letter-spacing:2px;">THE QUARANTINE SPIRE · ACT I</div>
+      </div>
+    </div>
+
+    <div id="charplate"></div>
+
+    <div class="quest-box">
+      <h3>THE UNLOGGED — ACT I</h3>
+      <ul id="questList">
+        <li data-q="q1">Q1 WAKE · walk to the Beacon</li>
+        <li data-q="q2">Q2 THE WANDERING BLADE · strike the dummy</li>
+        <li data-q="q3">Q3 YOU ARE NOT LOGGED · the Registry says no</li>
+        <li data-q="q4">Q4 SIGILCRAFT 101 · cast your first ember</li>
+        <li data-q="q5">Q5 RECON &amp; THE VAULT DOOR · scan vault.spire</li>
+        <li data-q="q6">Q6 ESCAPE THE SPIRE · breach the Hearth-Ward</li>
+      </ul>
+    </div>
+
+    <div style="display:flex; justify-content:space-between; align-items:flex-end;">
+      <div id="chatwrap">
+        <div id="chatbox">
+          <div class="line sys">> The Weave hums. You are not on the list.</div>
+        </div>
+        <button id="fsbtn" title="toggle fullscreen (F1)">⛶ FULLSCREEN</button>
+      </div>
+      <div>
+        <div id="party">
+          <div class="p you">✦ <span id="partyYou">you</span> <small>(unlogged)</small></div>
+          <div class="p"><span>Elowen</span> · siglist · lv 4</div>
+          <div class="p"><span>Merrin</span> · blade · lv 4</div>
+        </div>
+        <div id="minimap">
+          <div class="north">N</div>
+          <div class="dot" style="left:48%; top:40%; background:#4BE3FF;"></div>
+          <div class="dot" style="left:63%; top:30%; background:#FF7A45;"></div>
+          <div class="dot" style="left:38%; top:63%; background:#E8C96A;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="clicklay">
+    <h2>BREACHBORN</h2>
+    <p class="soul-line">"Every soul is a record. <b>Yours was never written.</b>"</p>
+    <input id="nameInput" maxlength="16" placeholder="name your soul" autocomplete="off" />
+    <div id="raceRow">
+      <button class="race" data-race="Aelfon">Aelfon</button>
+      <button class="race" data-race="Dwarf">Dwarf</button>
+      <button class="race" data-race="Felkin">Felkin</button>
+    </div>
+    <button id="enterBtn">WRITE YOUR SOUL INTO THE WEAVE</button>
+    <p class="small">guest account saved on this device · <kbd>WASD</kbd> walk · <kbd>mouse</kbd> look · <kbd>TAB</kbd> jack in (soon)</p>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
