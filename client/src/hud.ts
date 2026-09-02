@@ -112,6 +112,8 @@ export function createHud(): Hud {
   }
   setParty([]);
 
+  let chatCb: ((text: string) => void) | null = null; // must precede the returned object (TDZ)
+
   return {
     setFps: (fps, rttMs) => {
       fpsEl.textContent = `FPS ${fps}${rttMs !== undefined ? ` · ${Math.round(rttMs)}ms` : ''}`;
@@ -156,7 +158,6 @@ export function createHud(): Hud {
   };
 
   // Chat input: Enter opens (when not booting), Enter sends, Esc cancels.
-  let chatCb: ((text: string) => void) | null = null;
   function openChat(): void { chatInput.classList.add('show'); chatInput.focus(); }
   function closeChat(): void { chatInput.classList.remove('show'); chatInput.value = ''; chatInput.blur(); }
   window.addEventListener('keydown', (e) => {
