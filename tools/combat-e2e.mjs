@@ -43,11 +43,16 @@ function connect(name) {
           const qi = queue.findIndex(pred);
           if (qi >= 0) return Promise.resolve(queue.splice(qi, 1)[0]);
           return new Promise((res, rej) => {
-            const timer = setTimeout(() => rej(new Error(`timeout waiting for ${label}`)), ms);
-            waiters.push({
+            const entry = {
               pred,
               resolve: (m) => { clearTimeout(timer); res(m); },
-            });
+            };
+            const timer = setTimeout(() => {
+              const idx = waiters.indexOf(entry);
+              if (idx >= 0) waiters.splice(idx, 1); // dead waiter must not eat later msgs
+              rej(new Error(`timeout waiting for ${label}`));
+            }, ms);
+            waiters.push(entry);
           });
         },
         close: () => ws.close(),
@@ -57,19 +62,14 @@ function connect(name) {
   });
 }
 
-// Walk toward a target point in clamp-sized steps (server clamps 4.8m/msg).
+// Walk by pulsing the destination: the server clamps each claimed move to
+// 4.8m, so repeated claims converge the server pos onto the target exactly —
+// regardless of where the char currently stands.
 async function walkTo(c, tx, tz, y = 2.2) {
-  let x = 4, z = -12; // spawn ring
   let seq = 0;
-  for (let step = 0; step < 40; step++) {
-    const dx = tx - x, dz = tz - z;
-    const d = Math.hypot(dx, dz);
-    if (d < 0.6) break;
-    const stepLen = Math.min(4.2, d);
-    x += (dx / d) * stepLen;
-    z += (dz / d) * stepLen;
-    c.send({ t: 'movement', seq: seq++, ts: Date.now(), pos: { x, y, z }, yaw: Math.atan2(dx, dz), anim: 'run' });
-    await sleep(120);
+  for (let step = 0; step < 30; step++) {
+    c.send({ t: 'movement', seq: seq++, ts: Date.now(), pos: { x: tx, y, z: tz }, yaw: 0, anim: 'run' });
+    await sleep(110);
   }
 }
 
@@ -90,15 +90,25 @@ const run = async () => {
 
   const mobSpawn = await A.wait((m) => m.t === 'mobSpawn' && m.mobType === 'glimmerling', 4000, 'glimmerling mobSpawn');
   ok('mob backfill: glimmerling spawned', typeof mobSpawn.mobId === 'string', mobSpawn.mobId);
-  const glimId = mobSpawn.mobId;
-  const drone = A.all.find((m) => m.t === 'mobSpawn' && m.mobType === 'warden-drone');
-  ok('mob backfill: warden drone visible', Boolean(drone));
-  const dummySpawn = A.all.find((m) => m.t === 'mobSpawn' && m.mobType === 'dummy');
-  ok('training dummy spawned', Boolean(dummySpawn));
+  const drone = await A.wait((m) => m.t === 'mobSpawn' && m.mobType === 'warden-drone', 4000, 'drone mobSpawn');
+  ok('mob backfill: warden drone visible', typeof drone.mobId === 'string', drone.mobId);
+  const dummySpawn = await A.wait((m) => m.t === 'mobSpawn' && m.mobType === 'dummy', 4000, 'dummy mobSpawn');
+  ok('training dummy spawned', dummySpawn.mobId === 'dummy-0');
 
-  // --- 3.2 aggro: walk to the glimmerling, expect telegraph + damage ---
-  await walkTo(A, 12, -24);
-  const telegraph = await A.wait((m) => m.t === 'mobTelegraph' && m.mobId === glimId, 5000, 'telegraph');
+  // --- 3.2 aggro: walk to a LIVING glimmerling, expect telegraph + damage ---
+  // (backfill carries hp — dead mobs from a previous run show hp:0; prefer an
+  // alive one, else wait for its 20s respawn broadcast)
+  await sleep(700); // let the full backfill burst land
+  const glimSpawns = A.all.filter((m) => m.t === 'mobSpawn' && m.mobType === 'glimmerling');
+  const latest = new Map();
+  for (const g of glimSpawns) latest.set(g.mobId, g);
+  let glim = [...latest.values()].find((g) => g.hp > 0);
+  if (!glim) {
+    glim = await A.wait((m) => m.t === 'mobSpawn' && m.mobType === 'glimmerling' && m.hp > 0, 22000, 'glimmerling respawn');
+  }
+  const glimId = glim.mobId;
+  await walkTo(A, glim.pos.x, glim.pos.z);
+  const telegraph = await A.wait((m) => m.t === 'mobTelegraph' && m.mobId === glimId, 6000, 'telegraph');
   ok('mob aggro → telegraph received', typeof telegraph.ms === 'number' && telegraph.ms >= 500, `${telegraph.ms}ms windup`);
 
   const mobHit = await A.wait((m) => m.t === 'combat' && m.kind === 'hit' && m.mobId === glimId && m.target === myId, 6000, 'mob hit');
@@ -107,20 +117,21 @@ const run = async () => {
   ok('HP authoritative update received', hpDrop.hp < hpDrop.maxHp, `${hpDrop.hp}/${hpDrop.maxHp}`);
 
   // --- 3.1 attack combo: kill the glimmerling with staged swings ---
-  const swingPromises = [
-    A.wait((m) => m.t === 'combat' && m.kind === 'hit' && m.charId === myId && m.target === glimId, 1500, 'own hit'),
-    A.wait((m) => m.t === 'combat' && m.kind === 'hit' && m.charId === myId && m.target === glimId, 2500, 'own hit 2'),
-  ];
   A.send({ t: 'combat', kind: 'attack', target: glimId });
-  const firstHit = await swingPromises[0];
+  const firstHit = await A.wait((m) => m.t === 'combat' && m.kind === 'hit' && m.charId === myId && m.target === glimId, 1500, 'own hit');
   ok('attack intent → server hit event (stage damage)', typeof firstHit.amount === 'number' && firstHit.amount >= 12, `${firstHit.amount} dmg${firstHit.crit ? ' CRIT' : ''}`);
-  await sleep(500);
-  A.send({ t: 'combat', kind: 'attack', target: glimId });
-  await swingPromises[1];
-  await sleep(500);
-  A.send({ t: 'combat', kind: 'attack', target: glimId }); // 12+14+20 ≥ 30 → dies
-  const death = await A.wait((m) => m.t === 'combat' && m.kind === 'death' && m.mobId === glimId, 4000, 'mob death');
-  ok('glimmerling killed (server death event)', death.mobId === glimId);
+  // keep swinging on cooldown pacing until the server declares death
+  // (a crit upstream can make the NEXT swing the killing blow → death event
+  // replaces the hit event, so we loop rather than await a fixed hit count)
+  let death = null;
+  for (let i = 0; i < 6 && !death; i++) {
+    await sleep(500);
+    A.send({ t: 'combat', kind: 'attack', target: glimId });
+    try {
+      death = await A.wait((m) => m.t === 'combat' && m.kind === 'death' && m.mobId === glimId, 900, 'death');
+    } catch { /* still alive — swing again */ }
+  }
+  ok('glimmerling killed (server death event)', death !== null && death.mobId === glimId);
   const xp = await A.wait((m) => m.t === 'xp' && m.amount > 0, 3000, 'xp award');
   ok('XP awarded to top-damage char', xp.amount === 25, `+${xp.amount} XP (total ${xp.total})`);
 
