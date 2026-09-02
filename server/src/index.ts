@@ -4,13 +4,17 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import type { ClientMsg, ServerMsg } from '@breachborn/shared';
-import { World } from './world.ts';
+import { World, type Char } from './world.ts';
+import { Social, isEmote, sanitizeChat } from './social.ts';
 import { issueToken, verifyToken, newCharId, validateName, fallbackName, dedupeName, escapeHtml, sanitizeName } from './auth.ts';
 
 type HelloMsg = Extract<ClientMsg, { t: 'hello' }>;
+type ChatMsg = Extract<ClientMsg, { t: 'chat' }>;
+type PartyMsg = Extract<ClientMsg, { t: 'party' }>;
 
 const PORT = Number(process.env.PORT ?? 8080);
 const world = new World();
+const social = new Social();
 const byChar = new Map<string, WebSocket>();
 
 const http = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -84,9 +88,16 @@ wss.on('connection', (ws: WebSocket) => {
       case 'terminal':
         return; // arrives in M3+ / M4+
       case 'chat':
-      case 'party':
+        onChat(char, msg);
+        return;
       case 'emote':
-        return; // story 2.3
+        if (isEmote(msg.emote)) {
+          broadcastAoi(charId, { t: 'emote', charId, emote: msg.emote }, true);
+        }
+        return;
+      case 'party':
+        onParty(char, msg);
+        return;
     }
   });
 
@@ -95,7 +106,13 @@ wss.on('connection', (ws: WebSocket) => {
     if (byChar.get(charId) !== ws) return; // a newer connection replaced this one
     byChar.delete(charId);
     const left = world.disconnect(charId, Date.now());
-    if (left) broadcastAoi(left.charId, { t: 'despawn', charId: left.charId });
+    if (left) {
+      broadcastAoi(left.charId, { t: 'despawn', charId: left.charId });
+      if (left.partyId) {
+        const res = social.leave(left);
+        if (res.ok) broadcastParty(res.memberIds);
+      }
+    }
   });
 
   ws.on('error', () => ws.close());
@@ -153,6 +170,86 @@ function handleHello(ws: WebSocket, msg: HelloMsg, setCharId: (id: string) => vo
   }
   // Announce the joiner to everyone who can see them.
   broadcastAoi(char.charId, { t: 'spawn', charId: char.charId, name: char.name, pos: char.pos });
+}
+
+// Chat: rate-limited, sanitized; local → AOI, party → members only.
+function onChat(char: Char, msg: ChatMsg): void {
+  const now = Date.now();
+  if (!social.allowChat(char.charId, now)) {
+    sendToChar(char.charId, {
+      t: 'error', code: 'throttled',
+      message: 'the Weave dampens your voice — a breath, then speak',
+    });
+    return;
+  }
+  const text = sanitizeChat(String(msg.text ?? ''));
+  if (!text) return;
+  if (msg.channel === 'party') {
+    if (!char.partyId) {
+      sendToChar(char.charId, {
+        t: 'error', code: 'no-party',
+        message: 'you have no party — /party invite <name> first',
+      });
+      return;
+    }
+    for (const id of social.memberIdsOf(char.partyId)) {
+      if (id !== char.charId) {
+        sendToChar(id, { t: 'chat', from: char.name, channel: 'party', text });
+      }
+    }
+    return;
+  }
+  broadcastAoi(char.charId, { t: 'chat', from: char.name, channel: 'local', text });
+}
+
+// Party: invite (by name) → partyInvite toast; accept → party broadcast.
+function onParty(char: Char, msg: PartyMsg): void {
+  if (msg.action === 'invite') {
+    const who = typeof msg.who === 'string' ? msg.who : '';
+    const target = world.byName(who);
+    if (!target) {
+      sendToChar(char.charId, {
+        t: 'error', code: 'no-such-soul',
+        message: 'no soul by that name on this shard',
+      });
+      return;
+    }
+    const res = social.stageInvite(char, target);
+    if (!res.ok) {
+      sendToChar(char.charId, { t: 'error', code: res.code, message: res.message });
+      return;
+    }
+    sendToChar(target.charId, { t: 'partyInvite', from: char.name });
+    return;
+  }
+  if (msg.action === 'accept') {
+    const res = social.acceptInvite(char, (id) => world.chars.get(id));
+    if (!res.ok) {
+      sendToChar(char.charId, { t: 'error', code: res.code, message: res.message });
+      return;
+    }
+    broadcastParty(res.memberIds);
+    return;
+  }
+  if (msg.action === 'leave') {
+    const res = social.leave(char);
+    if (!res.ok) {
+      sendToChar(char.charId, { t: 'error', code: res.code, message: res.message });
+      return;
+    }
+    sendToChar(char.charId, { t: 'party', members: [] });
+    broadcastParty(res.memberIds);
+  }
+}
+
+// Push the member-name list to every (remaining) member.
+function broadcastParty(memberIds: string[]): void {
+  const members: string[] = [];
+  for (const id of memberIds) {
+    const c = world.chars.get(id);
+    if (c) members.push(c.name);
+  }
+  for (const id of memberIds) sendToChar(id, { t: 'party', members });
 }
 
 http.listen(PORT, () => {

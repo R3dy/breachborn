@@ -20,6 +20,29 @@ type Remote = {
 
 const INTERP_MS = 100;
 const MAX_SNAPS = 3;
+const FLOATER_LIFE_S = 1.4;
+
+type Floater = { sprite: THREE.Sprite; age: number };
+
+function makeTextSprite(text: string, color: string): THREE.Sprite {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.font = '600 30px Georgia, serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = '#000';
+    ctx.shadowBlur = 6;
+    ctx.fillStyle = color;
+    ctx.fillText(text, 128, 32);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+  sprite.scale.set(2.4, 0.6, 1);
+  return sprite;
+}
 
 function makeNameSprite(name: string): THREE.Sprite {
   const canvas = document.createElement('canvas');
@@ -74,6 +97,7 @@ function lerpAngle(a: number, b: number, t: number): number {
 
 export class Remotes {
   private map = new Map<string, Remote>();
+  private floaters: Floater[] = [];
 
   constructor(private scene: THREE.Scene) {}
 
@@ -153,10 +177,33 @@ export class Remotes {
         r.armR.rotation.x = 0;
       }
     }
+
+    // floaters: rise + fade, dispose at end of life
+    for (let i = this.floaters.length - 1; i >= 0; i--) {
+      const f = this.floaters[i] as Floater;
+      f.age += dt;
+      f.sprite.position.y += dt * 0.9;
+      const mat = f.sprite.material;
+      mat.opacity = Math.max(0, 1 - f.age / FLOATER_LIFE_S);
+      if (f.age >= FLOATER_LIFE_S) {
+        this.scene.remove(f.sprite);
+        mat.map?.dispose();
+        mat.dispose();
+        this.floaters.splice(i, 1);
+      }
+    }
   }
 
   posOf(charId: string): THREE.Vector3 | null {
     return this.map.get(charId)?.pos ?? null;
+  }
+
+  // Event-driven emote floater above a position (rises + fades).
+  floatText(at: THREE.Vector3, text: string): void {
+    const sprite = makeTextSprite(text, '#4BE3FF');
+    sprite.position.set(at.x, at.y + 3.1, at.z);
+    this.scene.add(sprite);
+    this.floaters.push({ sprite, age: 0 });
   }
 
   count(): number {

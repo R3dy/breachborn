@@ -66,6 +66,22 @@
       background:rgba(14,16,21,.55); border:1px solid rgba(232,230,223,.15); padding:8px 10px; }
     #chatbox .line b { color:var(--gold); }
     #chatbox .line.sys { color:var(--weave); }
+    #chatbox .line.party b { color:var(--weave); }
+    #chatInput { display:none; pointer-events:auto; width:100%; margin-top:6px; padding:7px 10px;
+      background:rgba(14,16,21,.88); border:1px solid rgba(232,201,106,.4); color:var(--parchment);
+      font-size:13px; font-family:'Trebuchet MS',sans-serif; outline:none; }
+    #chatInput.show { display:block; }
+    #chatInput:focus { border-color:var(--gold); box-shadow:0 0 12px #E8C96A22; }
+    #invtoast { position:fixed; top:70px; left:50%; transform:translateX(-50%); z-index:60;
+      display:none; pointer-events:auto; align-items:center; gap:12px;
+      background:rgba(14,16,21,.92); border:1px solid rgba(75,227,255,.45); padding:10px 16px;
+      font-size:13px; box-shadow:0 0 24px #4BE3FF22; }
+    #invtoast.show { display:flex; }
+    #invtoast b { color:var(--weave); }
+    #invAccept { background:linear-gradient(90deg,#2b7f97,var(--weave)); border:1px solid #9be8ff;
+      color:#0E1015; font-family:Georgia,serif; letter-spacing:2px; font-size:12px;
+      padding:5px 14px; cursor:pointer; }
+    #invAccept:hover { filter:brightness(1.15); }
     #fsbtn { pointer-events:auto; margin-top:6px; background:#14161c; color:var(--gold);
       border:1px solid rgba(232,201,106,.4); font-family:Georgia,serif; letter-spacing:2px;
       font-size:11px; padding:6px 14px; cursor:pointer; clip-path:polygon(0 0,100% 0,calc(100% - 8px) 100%,0 100%); }
@@ -141,6 +157,7 @@
         <div id="chatbox">
           <div class="line sys">> The Weave hums. You are not on the list.</div>
         </div>
+        <input id="chatInput" maxlength="240" placeholder="say something…  /wave /dance /point · /party …" autocomplete="off" />
         <button id="fsbtn" title="toggle fullscreen (F1)">⛶ FULLSCREEN</button>
       </div>
       <div>
@@ -156,6 +173,8 @@
       </div>
     </div>
   </div>
+
+  <div id="invtoast"><span><b id="invFrom"></b> invites you to a party</span><button id="invAccept">ACCEPT</button></div>
 
   <div id="clicklay">
     <h2>BREACHBORN</h2>

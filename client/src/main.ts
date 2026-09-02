@@ -7,6 +7,8 @@ import { connectNet, startPing } from './net.ts';
 import { Remotes } from './remote.ts';
 import type { ServerMsg } from '@breachborn/shared';
 
+const EMOTE_LABELS: Record<string, string> = { wave: '*waves*', dance: '*dances*', point: '*points*' };
+
 // WebGL2 check (graceful fallback)
 const canvasProbe = document.createElement('canvas');
 if (!canvasProbe.getContext('webgl2')) {
@@ -46,8 +48,11 @@ document.addEventListener('mousemove', (e) => {
   if (document.pointerLockElement !== renderer.domElement) return;
   input.mouseDX += e.movementX; input.mouseDY += e.movementY;
 });
-window.addEventListener('keydown', (e) => input.keys.add(e.code));
-window.addEventListener('keyup', (e) => input.keys.delete(e.code));
+window.addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLInputElement) return; // typing in chat
+  input.keys.add(e.code);
+});
+window.addEventListener('keyup', (e) => { input.keys.delete(e.code); });
 window.addEventListener('wheel', (e) => { input.scroll += e.deltaY; }, { passive: true });
 window.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -113,11 +118,69 @@ function onServerMsg(msg: ServerMsg): void {
         }
       }
       break;
+    case 'chat':
+      hud.chatLine(msg.from, decodeEntities(msg.text), msg.channel);
+      break;
+    case 'emote': {
+      const label = EMOTE_LABELS[msg.emote] ?? `*${msg.emote}*`;
+      const at = msg.charId === myCharId ? player.pos : remotes.posOf(msg.charId);
+      if (at) remotes.floatText(at, label);
+      break;
+    }
+    case 'party':
+      hud.setParty(msg.members.length > 0 ? msg.members : []);
+      break;
+    case 'partyInvite':
+      hud.showInvite(msg.from, () => net.send({ t: 'party', action: 'accept' }));
+      break;
     case 'error':
       hud.chatSystem(msg.message);
       break;
   }
 }
+
+// Server escapes HTML entities on the wire; textContent rendering is already
+// inert, so decode back to plain text for display.
+function decodeEntities(s: string): string {
+  const el = document.createElement('textarea');
+  el.innerHTML = s;
+  return el.value;
+}
+
+// Chat input → command parse → wire. Local echo for own chat lines.
+hud.onChat((raw) => {
+  if (!entered) return;
+  const text = raw.trim();
+  if (!text) return;
+  const emote = /^\/(wave|dance|point)$/i.exec(text);
+  if (emote) {
+    net.send({ t: 'emote', emote: emote[1]!.toLowerCase() });
+    return;
+  }
+  const invite = /^\/p(?:arty)?\s+invite\s+(\S+)$/i.exec(text);
+  if (invite?.[1]) {
+    const who = invite[1];
+    net.send({ t: 'party', action: 'invite', who });
+    hud.chatSystem(`You call out to ${who}…`);
+    return;
+  }
+  if (/^\/p(?:arty)?\s+leave$/i.test(text)) {
+    net.send({ t: 'party', action: 'leave' });
+    return;
+  }
+  const pchat = /^\/p(?:arty)?\s+(.+)$/i.exec(text);
+  if (pchat?.[1]) {
+    net.send({ t: 'chat', channel: 'party', text: pchat[1] });
+    hud.chatLine(myName, pchat[1], 'party');
+    return;
+  }
+  if (/^\/p(?:arty)?$/i.test(text)) {
+    hud.chatSystem('usage: /party invite <name> · /party <message> · /party leave');
+    return;
+  }
+  net.send({ t: 'chat', channel: 'local', text });
+  hud.chatLine(myName, text, 'local');
+});
 
 // visibility re-sync hook (M2 wires server reconciliation)
 document.addEventListener('visibilitychange', () => {
