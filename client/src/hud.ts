@@ -2,7 +2,7 @@
 import { TRACE } from '@breachborn/shared';
 
 export type Hud = {
-  setFps: (fps: number) => void;
+  setFps: (fps: number, rttMs?: number) => void;
   setTrace: (v: number) => void;
   setVigor: (v: number) => void;
   setWill: (v: number) => void;
@@ -113,7 +113,9 @@ export function createHud(): Hud {
   setParty([]);
 
   return {
-    setFps: (fps) => { fpsEl.textContent = `FPS ${fps}`; },
+    setFps: (fps, rttMs) => {
+      fpsEl.textContent = `FPS ${fps}${rttMs !== undefined ? ` · ${Math.round(rttMs)}ms` : ''}`;
+    },
     setTrace: (v) => {
       const pct = Math.round(v);
       traceFill.style.width = `${pct}%`;

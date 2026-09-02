@@ -215,7 +215,12 @@ function tick(): void {
   const now = performance.now();
   frames++;
   if (now - fpsLast > 500) {
-    hud.setFps(Math.round((frames * 1000) / (now - fpsLast)));
+    // RTT surfaced in HUD (dev only) — story 2.1 AC
+    const rtt = net.rtt();
+    hud.setFps(
+      Math.round((frames * 1000) / (now - fpsLast)),
+      import.meta.env.DEV && rtt > 0 ? rtt : undefined,
+    );
     frames = 0; fpsLast = now;
   }
   if (now - infoLast > 5000 && import.meta.env.DEV) {
