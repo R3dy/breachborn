@@ -488,7 +488,7 @@ setInterval(() => {
     sendToChar(r.id, { t: 'hp', charId: r.id, hp: r.hp, maxHp: r.maxHp });
     sendToChar(r.id, {
       t: 'chat', from: 'the Weave', channel: 'local',
-      text: 'the unlogged drift clings to you for ${COMBAT.DRIFT_DEBUFF_MS / 1000}s',
+      text: `the unlogged drift clings to you for ${COMBAT.DRIFT_DEBUFF_MS / 1000}s`,
     });
     broadcastAoi(r.id, { t: 'combat', charId: r.id, kind: 'respawn' });
     broadcastAoi(r.id, { t: 'movement', charId: r.id, pos: r.pos, yaw: 0, anim: 'idle' });
