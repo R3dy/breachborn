@@ -1,26 +1,17 @@
 {
   "name": "breachborn",
   "private": true,
-  "version": "0.1.0",
   "type": "module",
-  "workspaces": [
-    "client",
-    "server",
-    "shared"
-  ],
-  "engines": {
-    "node": ">=20"
-  },
+  "workspaces": ["client", "server", "shared"],
   "scripts": {
     "dev:client": "npm run dev --workspace client",
     "dev:server": "npm run dev --workspace server",
     "build": "npm run build --workspace shared && npm run build --workspace client && npm run build --workspace server",
-    "typecheck": "tsc --noEmit -p shared && tsc --noEmit -p client && tsc --noEmit -p server",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "typecheck": "tsc -p tsconfig.base.json --noEmit"
   },
   "devDependencies": {
-    "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
   }
 }
