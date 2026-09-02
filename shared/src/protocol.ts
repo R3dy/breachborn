@@ -1,5 +1,6 @@
 // Wire protocol per ADR-008 — single source of truth for client + server.
 // JSON frames over WS; compact keys on the wire, typed here.
+import type { MobType } from './canon.ts';
 
 export type Vec3 = { x: number; y: number; z: number };
 
@@ -36,6 +37,9 @@ export type ServerMsg =
   | { t: 'xp'; amount: number; total: number }
   | { t: 'death'; respawnInMs: number }
   | { t: 'respawn'; pos: Vec3 }
+  | { t: 'mobSpawn'; mobId: string; mobType: MobType | 'dummy'; name: string; pos: Vec3; hp: number; maxHp: number }
+  | { t: 'mobMove'; mobId: string; pos: Vec3; yaw: number; state: 'idle' | 'chase' | 'return' }
+  | { t: 'mobTelegraph'; mobId: string; ms: number }
   | { t: 'quest'; questId: string; objectives: QuestObjective[]; completed: boolean }
   | { t: 'terminal'; session: string; out: TerminalOut }
   | { t: 'chat'; from: string; channel: 'local' | 'party'; text: string }
